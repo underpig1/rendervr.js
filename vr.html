@@ -78,20 +78,33 @@
       camera.enableVR();
 
       setInterval("render()", 0);
-
-      window.addEventListener("deviceorientation", function (e) {
-        if (camera.vr) {
-          rot.x = e.alpha;
-          rot.y = e.beta;
-        }
-      }, true);
-        window.addEventListener("devicemotion", function (e) {
+      
+      DeviceMotionEvent.requestPermission()
+        .then(permissionState => {
+          if (permissionState === 'granted') {
+            window.addEventListener("devicemotion", function (e) {
           if (camera.vr) {
             cam.x += e.acceleration.y;
             cam.y += e.acceleration.x;
             cam.z += e.acceleration.z;
           }
         }, true);
+          }
+        })
+        .catch(console.error);
+      
+      DeviceOrientationEvent.requestPermission()
+        .then(permissionState => {
+          if (permissionState === 'granted') {
+            window.addEventListener("deviceorientation", function (e) {
+        if (camera.vr) {
+          rot.x = e.alpha;
+          rot.y = e.beta;
+        }
+      }, true);
+          }
+        })
+        .catch(console.error);
 
       window.addEventListener("mousemove", function (e) {
           if (e.which == 1 && !e.shiftKey && !e.ctrlKey) {
