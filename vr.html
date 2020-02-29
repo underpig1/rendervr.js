@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src = "https://cdn.jsdelivr.net/npm/handtrackjs/dist/handtrack.min.js"></script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+
+      .context {
+        display: none;
+        position: absolute;
+        font-family: Arial;
+        font-weight: 1;
+        font-size: 2vh;
+        color: white;
+        background: #333;
+        box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
+      }
+
+      .context p {
+        width: 15vh;
+        padding: 1vh 5vh;
+        margin: 0;
+        cursor: pointer;
+      }
+
+      .context p:hover {
+        background: #444;
+      }
+    </style>
+  </head>
+  <body>
+    <video id = "video" style = "display: none;" autoplay></video>
+    <canvas id = "canvas"></canvas>
+    <div id = "context" class = "context">
+      <p id = "link">Merge Vertices</p>
+      <p id = "fill">Fill</p>
+      <p id = "delete">Delete Vertices</p>
+    </div>
+    <script>
+      var video = document.getElementById("video");
+      var canvas = document.getElementById("canvas");
+      var ctx = canvas.getContext("2d");
+      var view = 300;
+      var cam = {x: 0, y: -100, z: 0, speed: {x: 0, y: 0, z: 0}};
+      var rot = {x: 0, y: 0, speed: {x: 0, y: 0}};
+      var near = 0;
+      var x0, y0, z0, sinX, cosX, sinY, cosY;
+      var mouse = {x: 0, y: 0};
+      var objects = [];
+      var lights = [];
+      var environment;
+      var textures = [];
+      var controllers = [];
+      var scripts = [];
+      var hands = [];
+      var selection;
+      var model, webcam;
+      var accelerometer = new LinearAccelerationSensor({frequency: 60});
+      var object = new Material("rgba(10, 10, 10, 0.1)", "rgba(10, 10, 10, 0.1)");
+      var ground = new Material(null, "rgba(100, 100, 100, 0.1)");
+      var text = new Material(null, "rgba(1, 1, 1, 1)");
+      var hand = new Material("rgba(100, 100, 100, 0.1)", "rgba(100, 100, 100, 0.1)");
+      var camera = new Camera([0, -100, 0], [0, 0], 300, false);
+      new Light([0, 0, 0], 3);
+      new Environment(10, 1000);
+      new Webcam();
+      var controllers = [new Obj(hand, []), new Obj(hand, [])];
+      new Obj(object, [[[0, 10, 0], [100, 10, 0]], [[10, 10, 100], [0, 0, 100], [100, 0, 100]]]);
+      new Obj(object, [[[100, 10, 0], [100, 10, 0], [100, 10, 0]], [[10, 10, 100], [0, 0, 100], [100, 0, 100], [100, 0, 0], [100, 0, 0]]]);
+      new Obj(object, [[[0, 10, 0], [100, 10, 0], [100, 10, 0]], [[10, 10, 100], [0, 0, 100], [100, 0, 100], [100, 0, 0], [100, 0, 0]]]).name = "rgba";
+      new Obj(text, new Text(text = "Virtual Reality", font = "Arial", fontSize = 50, position = [0, -1000, 0], scale = 0.1)).rotate(0, -100, 0);
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      new Obj(ground, Grid(1000, 100)).translate(0, 100, 0);
+      camera.enableVR();
+
+      setInterval("render()", 0);
+
+      window.addEventListener("deviceorientation", function (e) {
+        if (camera.vr) {
+          rot.x = e.alpha;
+          rot.y = e.beta;
+        }
+      }, true);
+
+      if (accelerometer) {
+        accelerometer.addEventListener("reading", e => {
+          if (camera.vr) {
+            cam.x += accelerometer.y;
+            cam.y += accelerometer.x;
+            cam.z += accelerometer.z;
+          }
+        });
+        accelerometer.start();
+      }
+      else {
+        window.addEventListener("devicemotion", function (e) {
+          if (camera.vr) {
+            cam.x += e.acceleration.y;
+            cam.y += e.acceleration.x;
+            cam.z += e.acceleration.z;
+          }
+        }, true);
+      }
+
+      window.addEventListener("mousemove", function (e) {
+        if (!camera.vr) {
+          if (e.which == 1 && !e.shiftKey && !e.ctrlKey) {
+            rot.speed.x = -mouse.ySpeed/200;
+            rot.speed.y = -mouse.xSpeed/200;
+          }
+          if (e.which == 1 && e.shiftKey) {
+            cam.speed.x = mouse.xSpeed/2;
+            cam.speed.z = mouse.ySpeed/2;
+          }
+
+          if (e.which == 1 && e.ctrlKey) {
+            cam.speed.x = mouse.xSpeed/2;
+            cam.speed.y = -mouse.ySpeed/2;
+          }
+          mouse.xSpeed = mouse.x - e.clientX;
+          mouse.ySpeed = mouse.y - e.clientY;
+          mouse.x = e.clientX;
+          mouse.y = e.clientY;
+        }
+      }, true);
+
+      window.addEventListener("keydown", function (e) {
+        if (!camera.vr) {
+          if (e.key == "w") {
+            cam.speed.z += 1;
+          }
+          if (e.key == "a") {
+            cam.speed.x -= 1;
+          }
+          if (e.key == "s") {
+            cam.speed.z -= 1;
+          }
+          if (e.key == "d") {
+            cam.speed.x += 1;
+          }
+        }
+      }, true);
+
+      document.addEventListener("contextmenu", function(e) {
+        if (!camera.vr) {
+          e.preventDefault();
+          var context = document.getElementById("context");
+          if (!e.shiftKey) {
+            context.style.top = e.pageY + "px";
+            context.style.left = e.pageX + "px";
+            context.style.display = "block";
+          }
+        }
+      }, false);
+
+      canvas.addEventListener("click", function(e) {
+        context.style.display = "none";
+      }, false);
+
+      function Material(stroke = null, fill = null, unlit = false, texture = null, quality = 4) {
+        this.stroke = stroke;
+        this.fill = fill;
+        this.unlit = unlit;
+        this.quality = quality;
+        if (texture) {
+          this.texture = new Image();
+          this.texture.src = texture;
+          this.texture.alt = "Image Texture";
+          textures.push(this.texture);
+        }
+      }
+
+      function Light(position, strength) {
+        this.position = position;
+        this.strength = strength;
+        lights.push(this);
+      }
+
+      function Environment(fog = null, renderDistance = Infinity) {
+        this.fog = fog;
+        this.renderDistance = renderDistance;
+        environment = this;
+      }
+
+      function Raycast(start, end) {
+        this.start = start;
+        this.end = end;
+        this.position = this.start;
+        var vector = [this.start[0] - this.end[0], this.start[1] - this.end[1], this.start[2] - this.end[2]];
+        for (var i = 0; i < 1; i += 0.01) {
+          this.position[0] = this.start[0] + vector[0]*i;
+          this.position[1] = this.start[1] + vector[1]*i;
+          this.position[2] = this.start[2] + vector[2]*i;
+          for (var n = 0; n < objects.length; n++) {
+            for (var j = 0; j < objects[n].points.length; j++) {
+              for (var k = 0; k < objects[n].points[j].length; k++) {
+                if (objects[n].points[j][k][0] - 100 <= this.position[0] && objects[n].points[j][k][0] + 100 >= this.position[0] && objects[n].points[j][k][1] - 100 <= this.position[1] && objects[n].points[j][k][1] + 100 >= this.position[1] && objects[n].points[j][k][2] - 100 <= this.position[2] && objects[n].points[j][k][2] + 100 >= this.position[2]) {
+                  return i*Math.sqrt((this.start[0] - this.end[0])**2 + (this.start[1] - this.end[1])**2 + (this.start[2] - this.end[1])**2);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      function Webcam() {
+        webcam = this;
+        this.start = function() {
+          handTrack.startVideo(video);
+          handTrack.load({flipHorizontal: true, imageScaleFactor: 0.7, maxNumBoxes: 2, iouThreshold: 0.5, scoreThreshold: 0.79}).then(mod => {
+            model = mod;
+            handTrack.startVideo(video);
+            runDetection();
+          });
+          webcam.video = true;
+        }
+        this.stop = function() {
+          handTrack.stopVideo(video);
+          webcam.video = false;
+        }
+      }
+
+      function Camera(position, rotation, fov, vr) {
+        this.position = position;
+        this.rotation = rotation;
+        this.fov = fov;
+        this.vr = vr;
+        this.rotate = function(xValue, yValue, zValue) {
+          this.rotation[0] += xValue;
+          this.rotation[1] += yValue;
+          this.rotation[2] += zValue;
+          this.sync();
+        }
+        this.move = function(xValue, yValue, zValue) {
+          this.position[0] += xValue;
+          this.position[1] += yValue;
+          this.position[2] += zValue;
+          this.sync();
+        }
+        this.sync = function() {
+          cam.x = this.position[0];
+          cam.y = this.position[1];
+          cam.z = this.position[2];
+          rot.x = this.rotation[0];
+          rot.y = this.rotation[1];
+          rot.z = this.rotation[2];
+          view = this.fov;
+        }
+        this.enableVR = function() {
+          this.vr = true;
+          //webcam.start();
+          this.sync();
+        }
+        this.disableVR = function() {
+          this.vr = false;
+          webcam.stop();
+          this.sync();
+        }
+        this.sync();
+      }
+
+      function Mesh(points) {
+        return points;
+      }
+
+      function Pose(points, position, rotation) {
+        for (var i = 0; i < points.length; i++) {
+          for (var j = 0; j < points[i].length; j++) {
+            points[i][j][0] += position[0];
+            points[i][j][1] += position[1];
+            points[i][j][2] += position[2];
+          }
+        }
+        for (var i = 0; i < points.length; i++) {
+          for (var j = 0; j < points[i].length; j++) {
+            var rad = rotation[0]*Math.PI/180;
+            var cosa = Math.cos(rad);
+            var sina = Math.sin(rad);
+            var y = points[i][j][1]*cosa - points[i][j][2]*sina;
+            var z = points[i][j][1]*sina + points[i][j][2]*cosa;
+            points[i][j][1] = y;
+            points[i][j][2] = z;
+            rad = rotation[1]*Math.PI/180;
+            cosa = Math.cos(rad);
+            sina = Math.sin(rad);
+            z = points[i][j][2]*cosa - points[i][j][0]*sina;
+            var x = points[i][j][2]*sina + points[i][j][0]*cosa;
+            points[i][j][0] = x;
+            points[i][j][2] = z;
+            rad = rotation[2]*Math.PI/180;
+            cosa = Math.cos(rad);
+            sina = Math.sin(rad);
+            x = points[i][j][0]*cosa - points[i][j][1]*sina;
+            y = points[i][j][0]*sina + points[i][j][1]*cosa;
+            points[i][j][0] = x;
+            points[i][j][1] = y;
+          }
+        }
+        return points;
+      }
+
+      function Cube(scale) {
+        return Mesh(
+          [[[-scale, scale, -scale], [scale, scale, -scale], [scale, scale, scale], [-scale, scale, scale], [-scale, scale, -scale]],
+          [[-scale, -scale, -scale], [scale, -scale, -scale], [scale, -scale, scale], [-scale, -scale, scale], [-scale, -scale, -scale]],
+          [[scale, -scale, -scale], [scale, scale, -scale], [scale, scale, scale], [scale, -scale, scale], [scale, -scale, -scale]],
+          [[-scale, -scale, -scale], [-scale, -scale, scale], [-scale, scale, scale], [-scale, scale, -scale], [-scale, -scale, -scale]],
+          [[-scale, -scale, -scale], [scale, -scale, -scale], [-scale, -scale, -scale], [-scale, scale, -scale], [-scale, -scale, -scale]],
+          [[-scale, -scale, scale], [scale, -scale, scale], [-scale, -scale, scale], [-scale, scale, scale], [-scale, -scale, scale]]]
+        );
+      }
+
+      function Script(script, update = false) {
+        this.script = script;
+        this.update = update;
+        scripts.push(this);
+        this.variables = {};
+        this.run = function(script) {
+          if (script) {
+            for (var [key, value] of Object.entries(this.variables)) {
+              script.replace(key, value);
+            }
+            if (script.includes("get")) {
+              if (script.includes("mesh")) {
+                var object = script.match(/(?<=get\(\s*).*?(?=\s*\.mesh\))/gs);
+                if (script.includes("rotate")) {
+                  var values = script.match(/(?<=\.mesh\)\.rotate\(\s*).*?(?=\s*\))/gs).toString();
+                  values = values.split(", ");
+                  for (var i = 0; i < values.length; i++) {
+                    values[i] = parseFloat(values[i]);
+                  }
+                  for (var n = 0; n < objects.length; n++) {
+                    if (objects[n].name == object) {
+                      objects[n].rotate.apply(values);
+                    }
+                  }
+                }
+                if (script.includes("translate")) {
+                  var values = script.match(/(?<=\.mesh\)\.translate\(\s*).*?(?=\s*\))/gs).toString();
+                  values = values.split(", ");
+                  for (var i = 0; i < values.length; i++) {
+                    values[i] = parseFloat(values[i]);
+                  }
+                  for (var n = 0; n < objects.length; n++) {
+                    if (objects[n].name == object) {
+                      objects[n].translate.apply(values);
+                    }
+                  }
+                }
+              }
+              if (script.includes("physics")) {
+                var object = script.match(/(?<=get\(\s*).*?(?=\s*\.physics\))/gs);
+                if (script.includes("apply")) {
+                  var values = script.match(/(?<=\.physics\)\.apply\(\s*).*?(?=\s*\))/gs).toString();
+                  values = values.split(", ");
+                  for (var i = 0; i < values.length; i++) {
+                    values[i] = parseFloat(values[i]);
+                  }
+                  for (var n = 0; n < objects.length; n++) {
+                    if (objects[n].name == object) {
+                      objects[n].physics[values[0]] = values.slice(1);
+                    }
+                  }
+                }
+                if (script.includes("remove")) {
+                  var values = script.match(/(?<=\.physics\)\.remove\(\s*).*?(?=\s*\))/gs).toString();
+                  values = values.split(", ");
+                  for (var i = 0; i < values.length; i++) {
+                    values[i] = parseFloat(values[i]);
+                  }
+                  for (var n = 0; n < objects.length; n++) {
+                    if (objects[n].name == object) {
+                      for (var x = 0; x < values.length; x++) {
+                        delete objects[n].physics[values[x]];
+                      }
+                    }
+                  }
+                }
+              }
+              if (script.includes("onCollision")) {
+                var object = script.match(/(?<=onCollision\(\s*).*?(?=\s*\))/gs);
+                var execute = script.match(/(?<=\{\(\s*).*?(?=\s*\})/gs);
+                for (var n = 0; n < objects.length; n++) {
+                  if (objects[n].name == object) {
+                    if (objects[n].collisions().length > 0) {
+                      this.run(execute);
+                    }
+                  }
+                }
+              }
+              if (script.includes("instance")) {
+                var object = script.match(/(?<=instance\(\s*).*?(?=\s*\))/gs).toString();
+                object = object.split(", ");
+                for (var i = 0; i < object.length; i++) {
+                  object[i] = parseFloat(object[i]);
+                }
+                for (var n = 0; n < objects.length; n++) {
+                  if (objects[n].name == object[0]) {
+                    new Obj(objects[n].material, objects[n].points).name = object[1];
+                  }
+                }
+              }
+              if (script.includes("var")) {
+                var variable = script.match(/(?<=var\(\s*).*?(?=\s*\))/gs).toString();
+                variable = variable.split(", ");
+                for (var i = 0; i < variable.length; i++) {
+                  variable[i] = parseFloat(variable[i]);
+                }
+                this.variables[variable[0]] = variable[1];
+              }
+              if (script.includes("iter")) {
+                var iteration = script.match(/(?<=iter\(\s*).*?(?=\s*\))/gs);
+                var execute = script.match(/(?<=\{\(\s*).*?(?=\s*\})/gs);
+                for (var i = 0; i <= iteration.toString(); i++) {
+                  this.run(execute);
+                }
+              }
+              if (script.includes("JavaScript")) {
+                var execute = script.match(/(?<=JavaScript\(\(\s*).*?(?=\s*\))/gs);
+                eval(execute);
+              }
+            }
+          }
+        }
+        this.read = function() {
+          var script = this.script.match(/^.*([\n\r]+|$)/gm);
+          for (var i = 0; i <= script.length; i++) {
+            this.run(script[i]);
+          }
+        }
+      }
+
+      function JavaScript(script, update = false) {
+        this.script = script;
+        scripts.push(this);
+        this.update = update;
+        this.read = function() {
+          eval(this.script);
+        }
+      }
+
+      function Grid(scale, modifier) {
+        var points = [];
+        for (var x = -scale; x <= scale; x += modifier) {
+          for (var y = -scale; y <= scale; y += modifier) {
+            points.push([[x, 0, y], [x, 0, y + modifier], [x + modifier, 0, y + modifier], [x + modifier, 0, y], [x, 0, y]]);
+          }
+        }
+        return Mesh(points);
+      }
+
+      function Text(text = null, font = "serif", fontSize = 50, position = [0, 0, 0], scale = 1) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = fontSize + "px " + font;
+        ctx.fillStyle = "white";
+        ctx.fillText(text, 0, 100);
+        var data = [];
+        var points = [];
+        var quality = 5;
+        var data32 = new Uint32Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
+        for (var i = 0; i < data32.length; i++) {
+          if (data32[i] & 0xff000000) {
+            data.push({x: (i%canvas.width)*quality*2 + quality, y: ((i/canvas.width) | 0)*quality*2 + quality});
+          }
+        }
+        for (var i = 0; i < data.length; i++) {
+          points.push([
+            [(data[i].x + position[0])*scale, (data[i].y + position[1])*scale, position[2]],
+            [(data[i].x + position[0])*scale, (data[i].y + position[1] + quality*2 + 1)*scale, position[2]],
+            [(data[i].x + position[0] + quality*2 + 1)*scale, (data[i].y + position[1] + quality*2 + 1)*scale, position[2]],
+            [(data[i].x + position[0] + quality*2 + 1)*scale, (data[i].y + position[1])*scale, position[2]],
+            [(data[i].x + position[0])*scale, (data[i].y + position[1])*scale, position[2]],
+          ]);
+        }
+        return Mesh(points);
+      }
+
+      function Obj(material, points, physics = {collisions: null, gravity: null, velocity: [0, 0, 0]}) {
+        this.points = points;
+        this.material = material;
+        this.physics = physics;
+        objects.push(this);
+        this.rotate = function(xAngle, yAngle, zAngle) {
+          for (var i = 0; i < this.points.length; i++) {
+            for (var j = 0; j < this.points[i].length; j++) {
+              var rad = xAngle*Math.PI/180;
+              var cosa = Math.cos(rad);
+              var sina = Math.sin(rad);
+              var y = this.points[i][j][1]*cosa - this.points[i][j][2]*sina;
+              var z = this.points[i][j][1]*sina + this.points[i][j][2]*cosa;
+              this.points[i][j][1] = y;
+              this.points[i][j][2] = z;
+              rad = yAngle*Math.PI/180;
+              cosa = Math.cos(rad);
+              sina = Math.sin(rad);
+              z = this.points[i][j][2]*cosa - this.points[i][j][0]*sina;
+              var x = this.points[i][j][2]*sina + this.points[i][j][0]*cosa;
+              this.points[i][j][0] = x;
+              this.points[i][j][2] = z;
+              rad = zAngle*Math.PI/180;
+              cosa = Math.cos(rad);
+              sina = Math.sin(rad);
+              x = this.points[i][j][0]*cosa - this.points[i][j][1]*sina;
+              y = this.points[i][j][0]*sina + this.points[i][j][1]*cosa;
+              this.points[i][j][0] = x;
+              this.points[i][j][1] = y;
+            }
+          }
+        }
+        this.translate = function(xValue, yValue, zValue) {
+          for (var i = 0; i < this.points.length; i++) {
+            for (var j = 0; j < this.points[i].length; j++) {
+              this.points[i][j][0] += xValue;
+              this.points[i][j][1] += yValue;
+              this.points[i][j][2] += zValue;
+            }
+          }
+        }
+        this.triangulate = function() {
+          var points = this.points;
+          for (var i = 0; i < points.length; i++) {
+            for (var j = 0; j < points[i].length; j += 2) {
+              points[i].splice(j + 3, 0, [points[i][j][0], points[i][j][1], points[i][j][2]]);
+            }
+          }
+          return points;
+        }
+        this.collisions = function() {
+          var collision = [];
+          var boundingBox = BoundingBox(this);
+          for (var i = 0; i < objects.length; i++) {
+            if (intersect(boundingBox, BoundingBox(objects[i])) && objects[i] != this) {
+              collision.push(objects[i]);
+            }
+          }
+          return collision;
+        }
+        this.inset = function(xValue, yValue, zValue) {
+          for (var i = 0; i < this.points.length; i++) {
+            for (var j = 0; j < this.points[i].length; j++) {
+              this.points[i][j][0] = this.points[0][0][0] + xValue*(this.points[i][j][0] - this.points[0][0][0]);
+              this.points[i][j][1] = this.points[0][0][1] + yValue*(this.points[i][j][1] - this.points[0][0][1]);
+              this.points[i][j][2] = this.points[0][0][2] + zValue*(this.points[i][j][2] - this.points[0][0][2]);
+            }
+          }
+        }
+        this.updatePhysics = function() {
+          if (this.physics.gravity) {
+            if (this.physics.collisions && this.collisions().length <= 0) {
+              for (var i = 0; i < this.points.length; i++) {
+                for (var j = 0; j < this.points[i].length; j++) {
+                  this.physics.velocity[1] -= this.physics.gravity;
+                  this.points[i][j][1] -= this.physics.velocity[1]/10000;
+                }
+              }
+            }
+            else {
+              for (var i = 0; i < this.points.length; i++) {
+                for (var j = 0; j < this.points[i].length; j++) {
+                  this.physics.velocity[1] -= this.physics.gravity;
+                  this.points[i][j][1] -= this.physics.velocity[1]/10000;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      function BoundingBox(object) {
+        var xValues = [];
+        var yValues = [];
+        var zValues = [];
+        for (var i = 0; i < object.points.length; i++) {
+          for (var j = 0; j < object.points[i].length; j++) {
+            xValues.push(object.points[i][j][0]);
+          }
+        }
+        for (var i = 0; i < object.points.length; i++) {
+          for (var j = 0; j < object.points[i].length; j++) {
+            yValues.push(object.points[i][j][1]);
+          }
+        }
+        for (var i = 0; i < object.points.length; i++) {
+          for (var j = 0; j < object.points[i].length; j++) {
+            zValues.push(object.points[i][j][2]);
+          }
+        }
+        this.x = Math.min(...xValues);
+        this.y = Math.min(...yValues);
+        this.z = Math.min(...zValues);
+        this.width = Math.max(...xValues);
+        this.height = Math.max(...yValues);
+        this.depth = Math.max(...zValues);
+        return {x: this.x, y: this.y, z: this.z, width: this.width, height: this.height, depth: this.depth};
+      }
+
+      function render() {
+        trigValues();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (var n = 0; n < objects.length; n++) {
+          for (var i = 0; i < objects[n].points.length; i++) {
+            if (Math.sqrt((objects[n].points[i][0][0] - cam.x)**2 + (objects[n].points[i][0][1] - cam.y)**2 + (objects[n].points[i][0][2] - cam.z)**2) <= environment.renderDistance) {
+              if (objects[n].material.texture) {
+                switch (objects[n].points[i].length % 4) {
+                  case 0:
+                    try {
+                      imageWarp(objects[n].material.texture, objects[n].material.quality, [projection(objects[n].points[i][0]), projection(objects[n].points[i][1]), projection(objects[n].points[i][2]), projection(objects[n].points[i][3])]);
+                    }
+                    catch(error) {}
+                    break;
+                  case 3:
+                    try {
+                      imageWarp(objects[n].material.texture, objects[n].material.quality, [projection(objects[n].points[i][0]), projection(objects[n].points[i][1]), projection(objects[n].points[i][2]), projection(objects[n].points[i][2])]);
+                    }
+                    catch(error) {}
+                    break;
+                  default:
+                    break;
+                }
+              }
+              var fill = objects[n].material.fill;
+              var stroke = objects[n].material.stroke;
+              if (!objects[n].material.unlit) {
+                for (var j = 0; j < lights.length; j++) {
+                  if (objects[n].material.fill) {
+                    var factor = (Math.sqrt((lights[j].position[0] - objects[n].points[i][0][0])**2 + (lights[j].position[1] - objects[n].points[i][0][1])**2 + (lights[j].position[2] - objects[n].points[i][0][2])**2))/lights[j].strength/100;
+                    var rgba = fill.match(/[.?\d]+/g);
+                    rgba[0] /= factor;
+                    rgba[1] /= factor;
+                    rgba[2] /= factor;
+                    if (rgba[0] > 255) {
+                      rgba[0] = 255;
+                    }
+                    if (rgba[1] > 255) {
+                      rgba[1] = 255;
+                    }
+                    if (rgba[2] > 255) {
+                      rgba[2] = 255;
+                    }
+                    if (environment.fog) {
+                      var factor = (Math.sqrt((objects[n].points[i][0][0] - cam.x)**2 + (objects[n].points[i][0][1] - cam.y)**2 + (objects[n].points[i][0][2] - cam.z)**2))*environment.fog/1000;
+                      rgba[3] /= factor;
+                      if (rgba[3] > 1) {
+                        rgba[3] = 1;
+                      }
+                      else if (rgba[3] < 0) {
+                        rgba[3] = 0;
+                      }
+                    }
+                    fill = "rgba(" + Math.round(rgba[0]) + ", " + Math.round(rgba[1]) + ", " + Math.round(rgba[2]) + ", " + rgba[3] + ")";
+                  }
+                  if (objects[n].material.stroke) {
+                    rgba = stroke.match(/[.?\d]+/g);
+                    rgba[0] /= factor;
+                    rgba[1] /= factor;
+                    rgba[2] /= factor;
+                    if (rgba[0] > 255) {
+                      rgba[0] = 255;
+                    }
+                    if (rgba[1] > 255) {
+                      rgba[1] = 255;
+                    }
+                    if (rgba[2] > 255) {
+                      rgba[2] = 255;
+                    }
+                    if (environment.fog) {
+                      var factor = (Math.sqrt((objects[n].points[i][0][0] - cam.x)**2 + (objects[n].points[i][0][1] - cam.y)**2 + (objects[n].points[i][0][2] - cam.z)**2))*environment.fog/1000;
+                      rgba[3] /= factor;
+                      if (rgba[3] > 1) {
+                        rgba[3] = 1;
+                      }
+                      else if (rgba[3] < 0) {
+                        rgba[3] = 0;
+                      }
+                    }
+                    stroke = "rgba(" + Math.round(rgba[0]) + ", " + Math.round(rgba[1]) + ", " + Math.round(rgba[2]) + ", " + rgba[3] + ")";
+                  }
+                }
+              }
+              draw(stroke, fill, objects[n].points[i]);
+            }
+            if ("updatePhysics" in objects[n]) {
+              objects[n].updatePhysics();
+            }
+          }
+          if (selection) {
+            var bbox = BoundingBox(selection);
+            draw("rgba(0, 200, 0, 0.5)", "rgba(0, 200, 0, 0.1)", [[bbox.x, bbox.y, bbox.z], [bbox.width, bbox.y, bbox.z], [bbox.width, bbox.height, bbox.z], [bbox.x, bbox.height, bbox.z], [bbox.x, bbox.y, bbox.z]]);
+            draw("rgba(0, 200, 0, 0.5)", "rgba(0, 200, 0, 0.1)", [[bbox.x, bbox.y, bbox.z], [bbox.x, bbox.y, bbox.depth], [bbox.x, bbox.height, bbox.depth], [bbox.x, bbox.height, bbox.z], [bbox.x, bbox.y, bbox.z]]);
+            draw("rgba(0, 200, 0, 0.5)", "rgba(0, 200, 0, 0.1)", [[bbox.x, bbox.y, bbox.z], [bbox.x, bbox.y, bbox.depth], [bbox.width, bbox.y, bbox.depth], [bbox.width, bbox.y, bbox.z], [bbox.x, bbox.y, bbox.z]]);
+            draw("rgba(0, 200, 0, 0.5)", "rgba(0, 200, 0, 0.1)", [[bbox.x, bbox.height, bbox.z], [bbox.x, bbox.height, bbox.depth], [bbox.width, bbox.height, bbox.depth], [bbox.width, bbox.height, bbox.z], [bbox.x, bbox.height, bbox.z]]);
+            draw("rgba(0, 200, 0, 0.5)", "rgba(0, 200, 0, 0.1)", [[bbox.x, bbox.y, bbox.depth], [bbox.width, bbox.y, bbox.depth], [bbox.width, bbox.height, bbox.depth], [bbox.x, bbox.height, bbox.depth], [bbox.x, bbox.y, bbox.depth]]);
+          }
+        }
+        for (var i = 0; i < scripts.length; i++) {
+          if (scripts[i].update) {
+            scripts[i].read();
+          }
+        }
+        if (webcam.video) {
+          if (hands.length == 0) {
+            for (var i = 0; i < controllers.length; i++) {
+              controllers[i].points = [];
+            }
+          }
+          for (var i = 0; i < hands.length; i++) {
+            controllers[i].points = Pose(Cube(10), [hands[i].bbox[0], hands[i].bbox[1], -hands[i].bbox[2]*10], [0, 0, 0]);
+            console.log(hands[i].bbox[0], hands[i].bbox[1], hands[i].bbox[2]*10);
+          }
+        }
+        rot.x += rot.speed.x;
+        rot.y -= rot.speed.y;
+        cam.x += cam.speed.x;
+        cam.y -= cam.speed.y;
+        cam.z -= cam.speed.z;
+        rot.speed.x *= 0.9;
+        rot.speed.y *= 0.9;
+        cam.speed.x *= 0.9;
+        cam.speed.y *= 0.9;
+        cam.speed.z *= 0.9;
+      }
+
+      function runDetection() {
+        model.detect(video).then(predictions => {
+          hands = predictions;
+          if (webcam.video) {
+            requestAnimationFrame(runDetection);
+          }
+        });
+      }
+
+      function imageWarp(image, step, points) {
+        var corners = [{x: points[0].x, y: points[0].y}, {x: points[1].x, y: points[1].y}, {x: points[2].x, y: points[2].y}, {x: points[3].x, y: points[3].y}];
+        var p1, p2, p3, p4, y1c, y2c, y1n, y2n;
+        var w = image.width - 1;
+        var h = image.height - 1;
+        for (y = 0; y < h; y += step) {
+          for (x = 0; x < w; x += step) {
+            y1c = lerp(corners[0], corners[3],  y/h);
+            y2c = lerp(corners[1], corners[2],  y/h);
+            y1n = lerp(corners[0], corners[3], (y + step)/h);
+            y2n = lerp(corners[1], corners[2], (y + step)/h);
+            p1 = lerp(y1c, y2c,  x/w);
+            p2 = lerp(y1c, y2c, (x + step)/w);
+            p3 = lerp(y1n, y2n, (x + step)/w);
+            p4 = lerp(y1n, y2n,  x/w);
+            ctx.drawImage(image, x, y, step, step, p1.x, p1.y, Math.ceil(Math.max(step, Math.abs(p2.x - p1.x), Math.abs(p4.x - p3.x))) + 1, Math.ceil(Math.max(step, Math.abs(p1.y - p4.y), Math.abs(p2.y - p3.y))) + 1);
+          }
+        }
+        function lerp(p1, p2, t) {
+          return {x: p1.x + (p2.x - p1.x)*t, y: p1.y + (p2.y - p1.y)*t};
+        }
+      }
+
+      function intersect(a, b) {
+        return (a.x <= b.width && a.width >= b.x) && (a.y <= b.height && a.height >= b.y) && (a.z <= b.depth && a.depth >= b.z);
+      }
+
+      function projection(point) {
+        setPoint(point[0] - cam.x, point[1] - cam.y, point[2] - cam.z);
+        setPoint(z0*sinY + x0*cosY, y0, z0*cosY - x0*sinY);
+        setPoint(x0, y0*cosX - z0*sinX, y0*sinX + z0*cosX);
+        if (z0 >= near) {
+          screenPoint(view*(x0/z0), view*(y0/z0));
+          return {x: x0 + canvas.width/2, y: y0 + canvas.height/2};
+        }
+      }
+
+      function draw(stroke, fill, points) {
+        ctx.strokeStyle = stroke;
+        ctx.fillStyle = fill;
+        ctx.beginPath();
+        for (var i = 0; i < points.length; i++) {
+          if (projection(points[i])) {
+            ctx.lineTo(projection(points[i]).x, projection(points[i]).y);
+          }
+        }
+        ctx.closePath();
+        if (stroke) {
+          ctx.stroke();
+        }
+        if (fill) {
+          ctx.fill();
+        }
+      }
+
+      function trigValues() {
+        sinX = Math.sin(rot.x);
+        cosX = Math.cos(rot.x);
+        sinY = Math.sin(rot.y);
+        cosY = Math.cos(rot.y);
+      }
+
+      function setPoint(x, y, z) {
+        x0 = x;
+        y0 = y;
+        z0 = z;
+      }
+
+      function screenPoint(x, y) {
+        x0 = x;
+        y0 = y;
+      }
+    </script>
+  </body>
+<html>
