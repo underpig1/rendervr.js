@@ -57,8 +57,7 @@
       var scripts = [];
       var hands = [];
       var selection;
-      var model, webcam;
-      var accelerometer = new LinearAccelerationSensor({frequency: 60});
+      var model, webcam
       var object = new Material("rgba(10, 10, 10, 0.1)", "rgba(10, 10, 10, 0.1)");
       var ground = new Material(null, "rgba(100, 100, 100, 0.1)");
       var text = new Material(null, "rgba(1, 1, 1, 1)");
@@ -86,18 +85,6 @@
           rot.y = e.beta;
         }
       }, true);
-
-      if (accelerometer) {
-        accelerometer.addEventListener("reading", e => {
-          if (camera.vr) {
-            cam.x += accelerometer.y;
-            cam.y += accelerometer.x;
-            cam.z += accelerometer.z;
-          }
-        });
-        accelerometer.start();
-      }
-      else {
         window.addEventListener("devicemotion", function (e) {
           if (camera.vr) {
             cam.x += e.acceleration.y;
@@ -105,7 +92,6 @@
             cam.z += e.acceleration.z;
           }
         }, true);
-      }
 
       window.addEventListener("mousemove", function (e) {
           if (e.which == 1 && !e.shiftKey && !e.ctrlKey) {
