@@ -108,7 +108,6 @@
       }
 
       window.addEventListener("mousemove", function (e) {
-        if (!camera.vr) {
           if (e.which == 1 && !e.shiftKey && !e.ctrlKey) {
             rot.speed.x = -mouse.ySpeed/200;
             rot.speed.y = -mouse.xSpeed/200;
@@ -126,7 +125,6 @@
           mouse.ySpeed = mouse.y - e.clientY;
           mouse.x = e.clientX;
           mouse.y = e.clientY;
-        }
       }, true);
 
       window.addEventListener("keydown", function (e) {
