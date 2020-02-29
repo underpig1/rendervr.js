@@ -79,6 +79,7 @@
 
       setInterval("render()", 0);
       
+      function onClick() {
       DeviceMotionEvent.requestPermission()
         .then(permissionState => {
           if (permissionState === 'granted') {
@@ -92,7 +93,6 @@
           }
         })
         .catch(console.error);
-      
       DeviceOrientationEvent.requestPermission()
         .then(permissionState => {
           if (permissionState === 'granted') {
@@ -105,6 +105,7 @@
           }
         })
         .catch(console.error);
+        }
 
       window.addEventListener("mousemove", function (e) {
           if (e.which == 1 && !e.shiftKey && !e.ctrlKey) {
@@ -156,6 +157,7 @@
       }, false);
 
       canvas.addEventListener("click", function(e) {
+        onClick();
         context.style.display = "none";
       }, false);
 
